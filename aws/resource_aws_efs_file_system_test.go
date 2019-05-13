@@ -15,31 +15,12 @@ import (
 	"github.com/hashicorp/terraform/terraform"
 )
 
-func TestResourceAWSEFSFileSystem_validateReferenceName(t *testing.T) {
-	var value string
-	var errors []error
-
-	value = acctest.RandString(128)
-	_, errors = validateReferenceName(value, "reference_name")
-	if len(errors) == 0 {
-		t.Fatalf("Expected to trigger a validation error")
-	}
-
-	value = acctest.RandString(32)
-	_, errors = validateReferenceName(value, "reference_name")
-	if len(errors) != 0 {
-		t.Fatalf("Expected not to trigger a validation error")
-	}
-}
-
 func TestResourceAWSEFSFileSystem_hasEmptyFileSystems(t *testing.T) {
 	fs := &efs.DescribeFileSystemsOutput{
 		FileSystems: []*efs.FileSystemDescription{},
 	}
 
-	var actual bool
-
-	actual = hasEmptyFileSystems(fs)
+	actual := hasEmptyFileSystems(fs)
 	if !actual {
 		t.Fatalf("Expected return value to be true, got %t", actual)
 	}
@@ -54,9 +35,32 @@ func TestResourceAWSEFSFileSystem_hasEmptyFileSystems(t *testing.T) {
 
 }
 
+func TestAccAWSEFSFileSystem_importBasic(t *testing.T) {
+	resourceName := "aws_efs_file_system.foo-with-tags"
+	rInt := acctest.RandInt()
+
+	resource.ParallelTest(t, resource.TestCase{
+		PreCheck:     func() { testAccPreCheck(t) },
+		Providers:    testAccProviders,
+		CheckDestroy: testAccCheckEfsFileSystemDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccAWSEFSFileSystemConfigWithTags(rInt),
+			},
+
+			{
+				ResourceName:            resourceName,
+				ImportState:             true,
+				ImportStateVerify:       true,
+				ImportStateVerifyIgnore: []string{"creation_token"},
+			},
+		},
+	})
+}
+
 func TestAccAWSEFSFileSystem_basic(t *testing.T) {
 	rInt := acctest.RandInt()
-	resource.Test(t, resource.TestCase{
+	resource.ParallelTest(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
 		CheckDestroy: testAccCheckEfsFileSystemDestroy,
@@ -64,6 +68,7 @@ func TestAccAWSEFSFileSystem_basic(t *testing.T) {
 			{
 				Config: testAccAWSEFSFileSystemConfig,
 				Check: resource.ComposeTestCheckFunc(
+					testAccMatchResourceAttrRegionalARN("aws_efs_file_system.foo", "arn", "elasticfilesystem", regexp.MustCompile(`file-system/fs-.+`)),
 					resource.TestCheckResourceAttr(
 						"aws_efs_file_system.foo",
 						"performance_mode",
@@ -127,7 +132,7 @@ func TestAccAWSEFSFileSystem_basic(t *testing.T) {
 
 func TestAccAWSEFSFileSystem_pagedTags(t *testing.T) {
 	rInt := acctest.RandInt()
-	resource.Test(t, resource.TestCase{
+	resource.ParallelTest(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
 		CheckDestroy: testAccCheckEfsFileSystemDestroy,
@@ -154,8 +159,9 @@ func TestAccAWSEFSFileSystem_pagedTags(t *testing.T) {
 
 func TestAccAWSEFSFileSystem_kmsKey(t *testing.T) {
 	rInt := acctest.RandInt()
-	keyRegex := regexp.MustCompile("^arn:aws:([a-zA-Z0-9\\-])+:([a-z]{2}-[a-z]+-\\d{1})?:(\\d{12})?:(.*)$")
-	resource.Test(t, resource.TestCase{
+	kmsKeyResourceName := "aws_kms_key.foo"
+
+	resource.ParallelTest(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
 		CheckDestroy: testAccCheckEfsFileSystemDestroy,
@@ -163,7 +169,7 @@ func TestAccAWSEFSFileSystem_kmsKey(t *testing.T) {
 			{
 				Config: testAccAWSEFSFileSystemConfigWithKmsKey(rInt),
 				Check: resource.ComposeTestCheckFunc(
-					resource.TestMatchResourceAttr("aws_efs_file_system.foo-with-kms", "kms_key_id", keyRegex),
+					resource.TestCheckResourceAttrPair("aws_efs_file_system.foo-with-kms", "kms_key_id", kmsKeyResourceName, "arn"),
 					resource.TestCheckResourceAttr("aws_efs_file_system.foo-with-kms", "encrypted", "true"),
 				),
 			},
@@ -174,7 +180,7 @@ func TestAccAWSEFSFileSystem_kmsKey(t *testing.T) {
 func TestAccAWSEFSFileSystem_kmsConfigurationWithoutEncryption(t *testing.T) {
 	rInt := acctest.RandInt()
 
-	resource.Test(t, resource.TestCase{
+	resource.ParallelTest(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
 		CheckDestroy: testAccCheckEfsFileSystemDestroy,
@@ -190,7 +196,7 @@ func TestAccAWSEFSFileSystem_kmsConfigurationWithoutEncryption(t *testing.T) {
 func TestAccAWSEFSFileSystem_ProvisionedThroughputInMibps(t *testing.T) {
 	resourceName := "aws_efs_file_system.test"
 
-	resource.Test(t, resource.TestCase{
+	resource.ParallelTest(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
 		CheckDestroy: testAccCheckEfsFileSystemDestroy,
@@ -215,7 +221,7 @@ func TestAccAWSEFSFileSystem_ProvisionedThroughputInMibps(t *testing.T) {
 				ResourceName:            resourceName,
 				ImportState:             true,
 				ImportStateVerify:       true,
-				ImportStateVerifyIgnore: []string{"reference_name", "creation_token"},
+				ImportStateVerifyIgnore: []string{"creation_token"},
 			},
 		},
 	})
@@ -224,7 +230,7 @@ func TestAccAWSEFSFileSystem_ProvisionedThroughputInMibps(t *testing.T) {
 func TestAccAWSEFSFileSystem_ThroughputMode(t *testing.T) {
 	resourceName := "aws_efs_file_system.test"
 
-	resource.Test(t, resource.TestCase{
+	resource.ParallelTest(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
 		CheckDestroy: testAccCheckEfsFileSystemDestroy,
@@ -249,7 +255,7 @@ func TestAccAWSEFSFileSystem_ThroughputMode(t *testing.T) {
 				ResourceName:            resourceName,
 				ImportState:             true,
 				ImportStateVerify:       true,
-				ImportStateVerifyIgnore: []string{"reference_name", "creation_token"},
+				ImportStateVerifyIgnore: []string{"creation_token"},
 			},
 		},
 	})
@@ -296,11 +302,7 @@ func testAccCheckEfsFileSystem(resourceID string) resource.TestCheckFunc {
 			FileSystemId: aws.String(rs.Primary.ID),
 		})
 
-		if err != nil {
-			return err
-		}
-
-		return nil
+		return err
 	}
 }
 
@@ -326,11 +328,7 @@ func testAccCheckEfsCreationToken(resourceID string, expectedToken string) resou
 				expectedToken, *fs.CreationToken)
 		}
 
-		if err != nil {
-			return err
-		}
-
-		return nil
+		return err
 	}
 }
 
@@ -402,7 +400,7 @@ resource "aws_efs_file_system" "foo" {
 func testAccAWSEFSFileSystemConfigPagedTags(rInt int) string {
 	return fmt.Sprintf(`
 	resource "aws_efs_file_system" "foo" {
-		tags {
+	tags = {
 			Name = "foo-efs-%d"
 			Another = "tag"
 			Test = "yes"
@@ -422,7 +420,7 @@ func testAccAWSEFSFileSystemConfigPagedTags(rInt int) string {
 func testAccAWSEFSFileSystemConfigWithTags(rInt int) string {
 	return fmt.Sprintf(`
 	resource "aws_efs_file_system" "foo-with-tags" {
-		tags {
+	tags = {
 			Name = "foo-efs-%d"
 			Another = "tag"
 		}

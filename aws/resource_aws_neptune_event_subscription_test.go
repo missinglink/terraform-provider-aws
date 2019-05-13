@@ -18,7 +18,7 @@ func TestAccAWSNeptuneEventSubscription_basic(t *testing.T) {
 	rInt := acctest.RandInt()
 	rName := fmt.Sprintf("tf-acc-test-neptune-event-subs-%d", rInt)
 
-	resource.Test(t, resource.TestCase{
+	resource.ParallelTest(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
 		CheckDestroy: testAccCheckAWSNeptuneEventSubscriptionDestroy,
@@ -45,6 +45,11 @@ func TestAccAWSNeptuneEventSubscription_basic(t *testing.T) {
 					resource.TestCheckResourceAttr("aws_neptune_event_subscription.bar", "tags.Name", "tf-acc-test1"),
 				),
 			},
+			{
+				ResourceName:      "aws_neptune_event_subscription.bar",
+				ImportState:       true,
+				ImportStateVerify: true,
+			},
 		},
 	})
 }
@@ -54,7 +59,7 @@ func TestAccAWSNeptuneEventSubscription_withPrefix(t *testing.T) {
 	rInt := acctest.RandInt()
 	startsWithPrefix := regexp.MustCompile("^tf-acc-test-neptune-event-subs-")
 
-	resource.Test(t, resource.TestCase{
+	resource.ParallelTest(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
 		CheckDestroy: testAccCheckAWSNeptuneEventSubscriptionDestroy,
@@ -67,6 +72,12 @@ func TestAccAWSNeptuneEventSubscription_withPrefix(t *testing.T) {
 						"aws_neptune_event_subscription.bar", "name", startsWithPrefix),
 				),
 			},
+			{
+				ResourceName:            "aws_neptune_event_subscription.bar",
+				ImportState:             true,
+				ImportStateVerify:       true,
+				ImportStateVerifyIgnore: []string{"name_prefix"},
+			},
 		},
 	})
 }
@@ -75,7 +86,7 @@ func TestAccAWSNeptuneEventSubscription_withSourceIds(t *testing.T) {
 	var v neptune.EventSubscription
 	rInt := acctest.RandInt()
 
-	resource.Test(t, resource.TestCase{
+	resource.ParallelTest(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
 		CheckDestroy: testAccCheckAWSNeptuneEventSubscriptionDestroy,
@@ -100,6 +111,11 @@ func TestAccAWSNeptuneEventSubscription_withSourceIds(t *testing.T) {
 						"aws_neptune_event_subscription.bar", "source_ids.#", "2"),
 				),
 			},
+			{
+				ResourceName:      "aws_neptune_event_subscription.bar",
+				ImportState:       true,
+				ImportStateVerify: true,
+			},
 		},
 	})
 }
@@ -108,7 +124,7 @@ func TestAccAWSNeptuneEventSubscription_withCategories(t *testing.T) {
 	var v neptune.EventSubscription
 	rInt := acctest.RandInt()
 
-	resource.Test(t, resource.TestCase{
+	resource.ParallelTest(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
 		CheckDestroy: testAccCheckAWSNeptuneEventSubscriptionDestroy,
@@ -132,6 +148,11 @@ func TestAccAWSNeptuneEventSubscription_withCategories(t *testing.T) {
 					resource.TestCheckResourceAttr(
 						"aws_neptune_event_subscription.bar", "event_categories.#", "1"),
 				),
+			},
+			{
+				ResourceName:      "aws_neptune_event_subscription.bar",
+				ImportState:       true,
+				ImportStateVerify: true,
 			},
 		},
 	})
@@ -224,7 +245,7 @@ resource "aws_neptune_event_subscription" "bar" {
     "deletion",
     "maintenance"
   ]
-  tags {
+  tags = {
     Name = "tf-acc-test"
   }
 }`, rInt, rInt)
@@ -244,7 +265,7 @@ resource "aws_neptune_event_subscription" "bar" {
   event_categories = [
     "configuration change"
   ]
-  tags {
+  tags = {
     Name = "tf-acc-test1"
   }
 }`, rInt, rInt)
@@ -267,7 +288,7 @@ resource "aws_neptune_event_subscription" "bar" {
     "deletion",
     "maintenance"
   ]
-  tags {
+  tags = {
     Name = "tf-acc-test"
   }
 }`, rInt)
@@ -293,7 +314,7 @@ resource "aws_neptune_event_subscription" "bar" {
   event_categories = [
     "configuration change"
   ]
-  tags {
+  tags = {
     Name = "tf-acc-test"
   }
 }`, rInt, rInt, rInt)
@@ -325,7 +346,7 @@ func testAccAWSNeptuneEventSubscriptionConfigUpdateSourceIds(rInt int) string {
 		event_categories = [
 			"configuration change"
 		]
-		tags {
+	tags = {
 			Name = "tf-acc-test"
 		}
 	}`, rInt, rInt, rInt, rInt)
@@ -344,7 +365,7 @@ resource "aws_neptune_event_subscription" "bar" {
   event_categories = [
     "availability",
   ]
-  tags {
+  tags = {
     Name = "tf-acc-test"
   }
 }`, rInt, rInt)
