@@ -45,14 +45,20 @@ If multiple, different Terraform AWS Provider configurations are required, see t
 
 The Terraform AWS Provider allows the following endpoints to be customized:
 
+<div style="column-width: 14em;">
+
 - `acm`
 - `acmpca`
+- `amplify`
 - `apigateway`
 - `applicationautoscaling`
+- `applicationinsights`
 - `appmesh`
+- `appstream`
 - `appsync`
 - `athena`
 - `autoscaling`
+- `autoscalingplans`
 - `backup`
 - `batch`
 - `budgets`
@@ -105,12 +111,14 @@ The Terraform AWS Provider allows the following endpoints to be customized:
 - `iam`
 - `inspector`
 - `iot`
+- `iotevents`
 - `kafka`
 - `kinesis_analytics` (**DEPRECATED** Use `kinesisanalytics` instead)
 - `kinesis`
 - `kinesisanalytics`
 - `kinesisvideo`
 - `kms`
+- `lakeformation`
 - `lambda`
 - `lexmodels`
 - `licensemanager`
@@ -127,6 +135,7 @@ The Terraform AWS Provider allows the following endpoints to be customized:
 - `neptune`
 - `opsworks`
 - `organizations`
+- `personalize`
 - `pinpoint`
 - `pricing`
 - `quicksight`
@@ -146,6 +155,7 @@ The Terraform AWS Provider allows the following endpoints to be customized:
 - `serverlessrepo`
 - `servicecatalog`
 - `servicediscovery`
+- `servicequotas`
 - `ses`
 - `shield`
 - `sns`
@@ -161,6 +171,8 @@ The Terraform AWS Provider allows the following endpoints to be customized:
 - `worklink`
 - `workspaces`
 - `xray`
+
+</div>
 
 ## Connecting to Local AWS Compatible Solutions
 

@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"reflect"
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
@@ -68,11 +69,23 @@ func testSweepS3BucketObjects(region string) error {
 			continue
 		}
 
+		bucketRegion, err := testS3BucketRegion(conn, bucketName)
+
+		if err != nil {
+			log.Printf("[ERROR] Error getting S3 Bucket (%s) Location: %s", bucketName, err)
+			continue
+		}
+
+		if bucketRegion != region {
+			log.Printf("[INFO] Skipping S3 Bucket (%s) in different region: %s", bucketName, bucketRegion)
+			continue
+		}
+
 		input := &s3.ListObjectVersionsInput{
 			Bucket: bucket.Name,
 		}
 
-		err := conn.ListObjectVersionsPages(input, func(page *s3.ListObjectVersionsOutput, lastPage bool) bool {
+		err = conn.ListObjectVersionsPages(input, func(page *s3.ListObjectVersionsOutput, lastPage bool) bool {
 			if page == nil {
 				return !lastPage
 			}
@@ -102,11 +115,6 @@ func testSweepS3BucketObjects(region string) error {
 		})
 
 		if isAWSErr(err, s3.ErrCodeNoSuchBucket, "") {
-			continue
-		}
-
-		if isAWSErr(err, "AuthorizationHeaderMalformed", "region") || isAWSErr(err, "BucketRegionError", "") {
-			log.Printf("[INFO] Skipping S3 Bucket (%s) Objects: %s", bucketName, err)
 			continue
 		}
 
@@ -155,6 +163,50 @@ func testSweepS3BucketObjects(region string) error {
 	return nil
 }
 
+func TestAccAWSS3BucketObject_noNameNoKey(t *testing.T) {
+	bucketError := regexp.MustCompile(`bucket must not be empty`)
+	keyError := regexp.MustCompile(`key must not be empty`)
+
+	resource.ParallelTest(t, resource.TestCase{
+		PreCheck:     func() { testAccPreCheck(t) },
+		Providers:    testAccProviders,
+		CheckDestroy: testAccCheckAWSS3BucketObjectDestroy,
+		Steps: []resource.TestStep{
+			{
+				PreConfig:   func() {},
+				Config:      testAccAWSS3BucketObjectConfigBasic("", "a key"),
+				ExpectError: bucketError,
+			},
+			{
+				PreConfig:   func() {},
+				Config:      testAccAWSS3BucketObjectConfigBasic("a name", ""),
+				ExpectError: keyError,
+			},
+		},
+	})
+}
+func TestAccAWSS3BucketObject_empty(t *testing.T) {
+	var obj s3.GetObjectOutput
+	resourceName := "aws_s3_bucket_object.object"
+	rInt := acctest.RandInt()
+
+	resource.ParallelTest(t, resource.TestCase{
+		PreCheck:     func() { testAccPreCheck(t) },
+		Providers:    testAccProviders,
+		CheckDestroy: testAccCheckAWSS3BucketObjectDestroy,
+		Steps: []resource.TestStep{
+			{
+				PreConfig: func() {},
+				Config:    testAccAWSS3BucketObjectConfigEmpty(rInt),
+				Check: resource.ComposeTestCheckFunc(
+					testAccCheckAWSS3BucketObjectExists(resourceName, &obj),
+					testAccCheckAWSS3BucketObjectBody(&obj, ""),
+				),
+			},
+		},
+	})
+}
+
 func TestAccAWSS3BucketObject_source(t *testing.T) {
 	var obj s3.GetObjectOutput
 	resourceName := "aws_s3_bucket_object.object"
@@ -195,6 +247,30 @@ func TestAccAWSS3BucketObject_content(t *testing.T) {
 				Check: resource.ComposeTestCheckFunc(
 					testAccCheckAWSS3BucketObjectExists(resourceName, &obj),
 					testAccCheckAWSS3BucketObjectBody(&obj, "some_bucket_content"),
+				),
+			},
+		},
+	})
+}
+
+func TestAccAWSS3BucketObject_etagEncryption(t *testing.T) {
+	var obj s3.GetObjectOutput
+	resourceName := "aws_s3_bucket_object.object"
+	rInt := acctest.RandInt()
+	source := testAccAWSS3BucketObjectCreateTempFile(t, "{anything will do }")
+
+	resource.ParallelTest(t, resource.TestCase{
+		PreCheck:     func() { testAccPreCheck(t) },
+		Providers:    testAccProviders,
+		CheckDestroy: testAccCheckAWSS3BucketObjectDestroy,
+		Steps: []resource.TestStep{
+			{
+				PreConfig: func() {},
+				Config:    testAccAWSS3BucketObjectEtagEncryption(rInt, source),
+				Check: resource.ComposeTestCheckFunc(
+					testAccCheckAWSS3BucketObjectExists(resourceName, &obj),
+					testAccCheckAWSS3BucketObjectBody(&obj, "{anything will do }"),
+					resource.TestCheckResourceAttr(resourceName, "etag", "7b006ff4d70f68cc65061acf2f802e6f"),
 				),
 			},
 		},
@@ -278,6 +354,52 @@ func TestAccAWSS3BucketObject_updates(t *testing.T) {
 					testAccCheckAWSS3BucketObjectExists(resourceName, &modifiedObj),
 					testAccCheckAWSS3BucketObjectBody(&modifiedObj, "modified object"),
 					resource.TestCheckResourceAttr(resourceName, "etag", "1c7fd13df1515c2a13ad9eb068931f09"),
+				),
+			},
+		},
+	})
+}
+
+func TestAccAWSS3BucketObject_updateSameFile(t *testing.T) {
+	var originalObj, modifiedObj s3.GetObjectOutput
+	resourceName := "aws_s3_bucket_object.object"
+	rInt := acctest.RandInt()
+
+	startingData := "lane 8"
+	changingData := "chicane"
+
+	filename := testAccAWSS3BucketObjectCreateTempFile(t, startingData)
+	defer os.Remove(filename)
+
+	rewriteFile := func(*terraform.State) error {
+		if err := ioutil.WriteFile(filename, []byte(changingData), 0644); err != nil {
+			os.Remove(filename)
+			t.Fatal(err)
+		}
+		return nil
+	}
+
+	resource.ParallelTest(t, resource.TestCase{
+		PreCheck:     func() { testAccPreCheck(t) },
+		Providers:    testAccProviders,
+		CheckDestroy: testAccCheckAWSS3BucketObjectDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccAWSS3BucketObjectConfig_updateable(rInt, false, filename),
+				Check: resource.ComposeTestCheckFunc(
+					testAccCheckAWSS3BucketObjectExists(resourceName, &originalObj),
+					testAccCheckAWSS3BucketObjectBody(&originalObj, startingData),
+					resource.TestCheckResourceAttr(resourceName, "etag", "aa48b42f36a2652cbee40c30a5df7d25"),
+					rewriteFile,
+				),
+				ExpectNonEmptyPlan: true,
+			},
+			{
+				Config: testAccAWSS3BucketObjectConfig_updateable(rInt, false, filename),
+				Check: resource.ComposeTestCheckFunc(
+					testAccCheckAWSS3BucketObjectExists(resourceName, &modifiedObj),
+					testAccCheckAWSS3BucketObjectBody(&modifiedObj, changingData),
+					resource.TestCheckResourceAttr(resourceName, "etag", "fafc05f8c4da0266a99154681ab86e8c"),
 				),
 			},
 		},
@@ -409,6 +531,45 @@ func TestAccAWSS3BucketObject_acl(t *testing.T) {
 					testAccCheckAWSS3BucketObjectBody(&obj3, "changed_some_bucket_content"),
 					resource.TestCheckResourceAttr(resourceName, "acl", "private"),
 					testAccCheckAWSS3BucketObjectAcl(resourceName, []string{"FULL_CONTROL"}),
+				),
+			},
+		},
+	})
+}
+
+func TestAccAWSS3BucketObject_metadata(t *testing.T) {
+	rInt := acctest.RandInt()
+	var obj s3.GetObjectOutput
+	resourceName := "aws_s3_bucket_object.object"
+
+	resource.ParallelTest(t, resource.TestCase{
+		PreCheck:     func() { testAccPreCheck(t) },
+		Providers:    testAccProviders,
+		CheckDestroy: testAccCheckAWSS3BucketObjectDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccAWSS3BucketObjectConfig_withMetadata(rInt, "key1", "value1", "key2", "value2"),
+				Check: resource.ComposeTestCheckFunc(
+					testAccCheckAWSS3BucketObjectExists(resourceName, &obj),
+					resource.TestCheckResourceAttr(resourceName, "metadata.%", "2"),
+					resource.TestCheckResourceAttr(resourceName, "metadata.key1", "value1"),
+					resource.TestCheckResourceAttr(resourceName, "metadata.key2", "value2"),
+				),
+			},
+			{
+				Config: testAccAWSS3BucketObjectConfig_withMetadata(rInt, "key1", "value1updated", "key3", "value3"),
+				Check: resource.ComposeTestCheckFunc(
+					testAccCheckAWSS3BucketObjectExists(resourceName, &obj),
+					resource.TestCheckResourceAttr(resourceName, "metadata.%", "2"),
+					resource.TestCheckResourceAttr(resourceName, "metadata.key1", "value1updated"),
+					resource.TestCheckResourceAttr(resourceName, "metadata.key3", "value3"),
+				),
+			},
+			{
+				Config: testAccAWSS3BucketObjectConfigEmpty(rInt),
+				Check: resource.ComposeTestCheckFunc(
+					testAccCheckAWSS3BucketObjectExists(resourceName, &obj),
+					resource.TestCheckResourceAttr(resourceName, "metadata.%", "0"),
 				),
 			},
 		},
@@ -799,7 +960,16 @@ func testAccAWSS3BucketObjectCreateTempFile(t *testing.T, data string) string {
 	return filename
 }
 
-func testAccAWSS3BucketObjectConfigSource(randInt int, source string) string {
+func testAccAWSS3BucketObjectConfigBasic(bucket, key string) string {
+	return fmt.Sprintf(`
+resource "aws_s3_bucket_object" "object" {
+  bucket = "%s"
+  key = "%s"
+}
+`, bucket, key)
+}
+
+func testAccAWSS3BucketObjectConfigEmpty(randInt int) string {
 	return fmt.Sprintf(`
 resource "aws_s3_bucket" "object_bucket" {
   bucket = "tf-object-test-bucket-%d"
@@ -808,7 +978,20 @@ resource "aws_s3_bucket" "object_bucket" {
 resource "aws_s3_bucket_object" "object" {
   bucket = "${aws_s3_bucket.object_bucket.bucket}"
   key = "test-key"
-  source = "%s"
+}
+`, randInt)
+}
+
+func testAccAWSS3BucketObjectConfigSource(randInt int, source string) string {
+	return fmt.Sprintf(`
+resource "aws_s3_bucket" "object_bucket" {
+  bucket = "tf-object-test-bucket-%d"
+}
+
+resource "aws_s3_bucket_object" "object" {
+  bucket       = "${aws_s3_bucket.object_bucket.bucket}"
+  key          = "test-key"
+  source       = "%s"
   content_type = "binary/octet-stream"
 }
 `, randInt, source)
@@ -821,11 +1004,11 @@ resource "aws_s3_bucket" "object_bucket" {
 }
 
 resource "aws_s3_bucket_object" "object" {
-  bucket = "${aws_s3_bucket.object_bucket.bucket}"
-  key = "test-key"
-  source = "%s"
+  bucket           = "${aws_s3_bucket.object_bucket.bucket}"
+  key              = "test-key"
+  source           = "%s"
   content_language = "en"
-  content_type = "binary/octet-stream"
+  content_type     = "binary/octet-stream"
   website_redirect = "http://google.com"
 }
 `, randInt, source)
@@ -838,11 +1021,27 @@ resource "aws_s3_bucket" "object_bucket" {
 }
 
 resource "aws_s3_bucket_object" "object" {
-  bucket = "${aws_s3_bucket.object_bucket.bucket}"
-  key = "test-key"
+  bucket  = "${aws_s3_bucket.object_bucket.bucket}"
+  key     = "test-key"
   content = "%s"
 }
 `, randInt, content)
+}
+
+func testAccAWSS3BucketObjectEtagEncryption(randInt int, source string) string {
+	return fmt.Sprintf(`
+resource "aws_s3_bucket" "object_bucket" {
+  bucket = "tf-object-test-bucket-%d"
+}
+
+resource "aws_s3_bucket_object" "object" {
+  bucket  = "${aws_s3_bucket.object_bucket.bucket}"
+  key     = "test-key"
+  source = "%s"
+  server_side_encryption = "AES256"
+  etag = "${filemd5("%s")}"
+}
+`, randInt, source, source)
 }
 
 func testAccAWSS3BucketObjectConfigContentBase64(randInt int, contentBase64 string) string {
@@ -852,8 +1051,8 @@ resource "aws_s3_bucket" "object_bucket" {
 }
 
 resource "aws_s3_bucket_object" "object" {
-  bucket = "${aws_s3_bucket.object_bucket.bucket}"
-  key = "test-key"
+  bucket         = "${aws_s3_bucket.object_bucket.bucket}"
+  key            = "test-key"
   content_base64 = "%s"
 }
 `, randInt, contentBase64)
@@ -863,6 +1062,7 @@ func testAccAWSS3BucketObjectConfig_updateable(randInt int, bucketVersioning boo
 	return fmt.Sprintf(`
 resource "aws_s3_bucket" "object_bucket_3" {
   bucket = "tf-object-test-bucket-%d"
+
   versioning {
     enabled = %t
   }
@@ -870,9 +1070,9 @@ resource "aws_s3_bucket" "object_bucket_3" {
 
 resource "aws_s3_bucket_object" "object" {
   bucket = "${aws_s3_bucket.object_bucket_3.bucket}"
-  key = "updateable-key"
+  key    = "updateable-key"
   source = "%s"
-  etag = "${filemd5("%s")}"
+  etag   = "${filemd5("%s")}"
 }
 `, randInt, bucketVersioning, source, source)
 }
@@ -886,9 +1086,9 @@ resource "aws_s3_bucket" "object_bucket" {
 }
 
 resource "aws_s3_bucket_object" "object" {
-  bucket = "${aws_s3_bucket.object_bucket.bucket}"
-  key = "test-key"
-  source = "%s"
+  bucket     = "${aws_s3_bucket.object_bucket.bucket}"
+  key        = "test-key"
+  source     = "%s"
   kms_key_id = "${aws_kms_key.kms_key_1.arn}"
 }
 `, randInt, source)
@@ -901,9 +1101,9 @@ resource "aws_s3_bucket" "object_bucket" {
 }
 
 resource "aws_s3_bucket_object" "object" {
-  bucket = "${aws_s3_bucket.object_bucket.bucket}"
-  key = "test-key"
-  source = "%s"
+  bucket                 = "${aws_s3_bucket.object_bucket.bucket}"
+  key                    = "test-key"
+  source                 = "%s"
   server_side_encryption = "AES256"
 }
 `, randInt, source)
@@ -913,16 +1113,17 @@ func testAccAWSS3BucketObjectConfig_acl(randInt int, content, acl string) string
 	return fmt.Sprintf(`
 resource "aws_s3_bucket" "object_bucket" {
   bucket = "tf-object-test-bucket-%d"
+
   versioning {
     enabled = true
   }
 }
 
 resource "aws_s3_bucket_object" "object" {
-  bucket = "${aws_s3_bucket.object_bucket.bucket}"
-  key = "test-key"
+  bucket  = "${aws_s3_bucket.object_bucket.bucket}"
+  key     = "test-key"
   content = "%s"
-  acl = "%s"
+  acl     = "%s"
 }
 `, randInt, content, acl)
 }
@@ -934,9 +1135,9 @@ resource "aws_s3_bucket" "object_bucket" {
 }
 
 resource "aws_s3_bucket_object" "object" {
-  bucket = "${aws_s3_bucket.object_bucket.bucket}"
-  key = "test-key"
-  content = "some_bucket_content"
+  bucket        = "${aws_s3_bucket.object_bucket.bucket}"
+  key           = "test-key"
+  content       = "some_bucket_content"
   storage_class = "%s"
 }
 `, randInt, storage_class)
@@ -946,15 +1147,17 @@ func testAccAWSS3BucketObjectConfig_withTags(randInt int, key, content string) s
 	return fmt.Sprintf(`
 resource "aws_s3_bucket" "object_bucket" {
   bucket = "tf-object-test-bucket-%d"
+
   versioning {
     enabled = true
   }
 }
 
 resource "aws_s3_bucket_object" "object" {
-  bucket = "${aws_s3_bucket.object_bucket.bucket}"
-  key = "%s"
+  bucket  = "${aws_s3_bucket.object_bucket.bucket}"
+  key     = "%s"
   content = "%s"
+
   tags = {
     Key1 = "AAA"
     Key2 = "BBB"
@@ -968,15 +1171,17 @@ func testAccAWSS3BucketObjectConfig_withUpdatedTags(randInt int, key, content st
 	return fmt.Sprintf(`
 resource "aws_s3_bucket" "object_bucket" {
   bucket = "tf-object-test-bucket-%d"
+
   versioning {
     enabled = true
   }
 }
 
 resource "aws_s3_bucket_object" "object" {
-  bucket = "${aws_s3_bucket.object_bucket.bucket}"
-  key = "%s"
+  bucket  = "${aws_s3_bucket.object_bucket.bucket}"
+  key     = "%s"
   content = "%s"
+
   tags = {
     Key2 = "BBB"
     Key3 = "XXX"
@@ -991,15 +1196,34 @@ func testAccAWSS3BucketObjectConfig_withNoTags(randInt int, key, content string)
 	return fmt.Sprintf(`
 resource "aws_s3_bucket" "object_bucket" {
   bucket = "tf-object-test-bucket-%d"
+
   versioning {
     enabled = true
   }
 }
 
 resource "aws_s3_bucket_object" "object" {
-  bucket = "${aws_s3_bucket.object_bucket.bucket}"
-  key = "%s"
+  bucket  = "${aws_s3_bucket.object_bucket.bucket}"
+  key     = "%s"
   content = "%s"
 }
 `, randInt, key, content)
+}
+
+func testAccAWSS3BucketObjectConfig_withMetadata(randInt int, metadataKey1, metadataValue1, metadataKey2, metadataValue2 string) string {
+	return fmt.Sprintf(`
+resource "aws_s3_bucket" "object_bucket" {
+  bucket = "tf-object-test-bucket-%d"
+}
+
+resource "aws_s3_bucket_object" "object" {
+  bucket  = "${aws_s3_bucket.object_bucket.bucket}"
+  key     = "test-key"
+
+  metadata = {
+    %[2]s = %[3]q
+    %[4]s = %[5]q
+  }
+}
+`, randInt, metadataKey1, metadataValue1, metadataKey2, metadataValue2)
 }
