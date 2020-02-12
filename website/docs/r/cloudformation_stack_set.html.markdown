@@ -1,7 +1,7 @@
 ---
+subcategory: "CloudFormation"
 layout: "aws"
 page_title: "AWS: aws_cloudformation_stack_set"
-sidebar_current: "docs-aws-resource-cloudformation-stack-set"
 description: |-
   Manages a CloudFormation Stack Set.
 ---
@@ -102,6 +102,12 @@ In addition to all arguments above, the following attributes are exported:
 * `arn` - Amazon Resource Name (ARN) of the Stack Set.
 * `id` - Name of the Stack Set.
 * `stack_set_id` - Unique identifier of the Stack Set.
+
+## Timeouts
+
+`aws_cloudformation_stack_set` provides the following [Timeouts](/docs/configuration/resources.html#timeouts) configuration options:
+
+* `update` - (Default `30m`) How long to wait for a Stack Set to be updated.
 
 ## Import
 
